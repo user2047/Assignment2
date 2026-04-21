@@ -46,6 +46,7 @@ private:
 
     condition_variable cv_;
     mutex cvMutex_;
+    size_t pendingCount_;   // protected by cvMutex_
 
     atomic<bool> shuttingDown_;
     atomic<size_t> nextQueue_;

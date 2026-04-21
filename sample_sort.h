@@ -1,10 +1,11 @@
 #pragma once
 #include <vector>
+#include "SortStats.h"
 using std::vector;
 
-vector<int> sampleSortVersionA(vector<int>& array, int numChunks);
-vector<int> sampleSortVersionB(vector<int>& array, int numChunks);
-vector<int> sampleSortVersionC(vector<int>& array, int numChunks);
+vector<int> sampleSortVersionA(vector<int>& array, int numChunks, SortStats* stats = nullptr);
+vector<int> sampleSortVersionB(vector<int>& array, int numChunks, SortStats* stats = nullptr);
+vector<int> sampleSortVersionC(vector<int>& array, int numChunks, SortStats* stats = nullptr);
 
 void splitIntoEqualChunks(const vector<int>& input,vector<vector<int>>& chunks);
 

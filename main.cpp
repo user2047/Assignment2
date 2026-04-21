@@ -6,10 +6,6 @@ using std::vector;
 using std::cout;
 using std::endl;
 
-vector<int> sampleSortVersionA(vector<int>& Array, int numChunks);
-vector<int> sampleSortVersionB(vector<int>& Array, int numChunks);
-vector<int> sampleSortVersionC(vector<int>& Array, int numChunks);
-
 int main()
 {
     vector<int> data = {9, 3, 7, 1, 8, 2, 6, 5, 4, 0};

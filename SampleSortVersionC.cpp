@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <ctime>
 #include <vector>
 
 using std::max;
@@ -70,7 +72,7 @@ namespace
     }
 }
 
-vector<int> sampleSortVersionC(vector<int>& array, int numChunks)
+vector<int> sampleSortVersionC(vector<int>& array, int numChunks, SortStats* stats)
 {
     int arraySize = static_cast<int>(array.size());
 
@@ -108,6 +110,9 @@ vector<int> sampleSortVersionC(vector<int>& array, int numChunks)
 
     ThreadPool pool(numChunks);
     std::atomic<bool> taskFailed{ false };
+
+    std::clock_t cpuStart = std::clock();
+    auto wallStart = std::chrono::high_resolution_clock::now();
 
     // Phase 1: local sort + preview sampling
     Latch sortLatch(numChunks);
@@ -290,6 +295,17 @@ vector<int> sampleSortVersionC(vector<int>& array, int numChunks)
         vector<int> fallback = array;
         sort(fallback.begin(), fallback.end());
         return fallback;
+    }
+
+    if (stats)
+    {
+        auto wallEnd = std::chrono::high_resolution_clock::now();
+        std::clock_t cpuEnd = std::clock();
+        stats->wallTimeSeconds = std::chrono::duration<double>(wallEnd - wallStart).count();
+        stats->cpuTimeSeconds  = static_cast<double>(cpuEnd - cpuStart) / CLOCKS_PER_SEC;
+        stats->bucketStats.sizes.resize(numChunks);
+        for (int b = 0; b < numChunks; b++)
+            stats->bucketStats.sizes[b] = static_cast<int>(finalBuckets[b].size());
     }
 
     return result;

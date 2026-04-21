@@ -1,14 +1,19 @@
 #include "sample_sort.h"
 
 #include <algorithm>
+#include <chrono>
+#include <ctime>
 #include <thread>
 #include <vector>
 using std::vector;
 using std::thread;
-vector<int> sampleSortVersionA(vector<int>& Array, int numChunks) {
+vector<int> sampleSortVersionA(vector<int>& Array, int numChunks, SortStats* stats) {
 	// Array: input Array
 	// numChunks: number of chunks
 	int ArraySize = Array.size();
+
+	std::clock_t cpuStart = std::clock();
+	auto wallStart = std::chrono::high_resolution_clock::now();
 
 	// Phase 0: Split input Array into Chunks
 
@@ -116,6 +121,17 @@ vector<int> sampleSortVersionA(vector<int>& Array, int numChunks) {
 
     for (auto& t : tasks)
         t.join();
+
+    if (stats)
+    {
+        auto wallEnd = std::chrono::high_resolution_clock::now();
+        std::clock_t cpuEnd = std::clock();
+        stats->wallTimeSeconds = std::chrono::duration<double>(wallEnd - wallStart).count();
+        stats->cpuTimeSeconds  = static_cast<double>(cpuEnd - cpuStart) / CLOCKS_PER_SEC;
+        stats->bucketStats.sizes.resize(numChunks);
+        for (int b = 0; b < numChunks; b++)
+            stats->bucketStats.sizes[b] = bucketSizes[b];
+    }
 
     return output;
 }

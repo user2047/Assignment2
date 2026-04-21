@@ -18,6 +18,7 @@ using std::unique_lock;
 
 ThreadPool::ThreadPool(size_t numWorkers)
     : queues_(numWorkers == 0 ? 1 : numWorkers),
+      pendingCount_(0),
       shuttingDown_(false),
       nextQueue_(0)
 {
@@ -52,6 +53,11 @@ void ThreadPool::submitTask(Task task)
     {
         lock_guard<mutex> lock(queues_[index].mutex);
         queues_[index].tasks.push_front(std::move(task));
+    }
+
+    {
+        lock_guard<mutex> cvLock(cvMutex_);
+        ++pendingCount_;
     }
 
     cv_.notify_one();
@@ -140,7 +146,12 @@ void ThreadPool::workerLoop(size_t workerId)
             catch (...)
             {
                 // Keep the worker alive even if a task throws.
-                // You can add logging here later if you want.
+            }
+
+            {
+                lock_guard<mutex> cvLock(cvMutex_);
+                if (pendingCount_ > 0)
+                    --pendingCount_;
             }
 
             continue;
@@ -149,7 +160,7 @@ void ThreadPool::workerLoop(size_t workerId)
         unique_lock<mutex> lock(cvMutex_);
         cv_.wait(lock, [this]()
         {
-            return shuttingDown_.load() || hasPendingTasks();
+            return shuttingDown_.load() || pendingCount_ > 0;
         });
 
         if (shuttingDown_.load() && !hasPendingTasks())
