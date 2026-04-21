@@ -1,3 +1,5 @@
+#include "sample_sort.h"
+#include "PerformanceTest.h"
 #include <iostream>
 #include <vector>
 using std::vector;
@@ -16,6 +18,8 @@ int main()
     for (int x : sorted)
         cout << x << " ";
     cout << endl;
+
+	runPerformanceTest("sample_sort_a_results.csv", numChunks);
 
     return 0;
 }

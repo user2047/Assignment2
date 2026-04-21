@@ -1,8 +1,10 @@
+#include "sample_sort.h"
+
 #include <algorithm>
 #include <thread>
 #include <vector>
 using std::vector;
-
+using std::thread;
 vector<int> sampleSortVersionA(vector<int>& Array, int numChunks) {
 	// Array: input Array
 	// numChunks: number of chunks

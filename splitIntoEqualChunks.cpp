@@ -1,3 +1,4 @@
+#include "sample_sort.h"
 #include <vector>
 using std::vector;
 

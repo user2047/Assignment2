@@ -131,7 +131,15 @@
     </Link>
   </ItemDefinitionGroup>
 
-  <ItemGroup></ItemGroup>
+  <ItemGroup>
+  <ClCompile Include="..\main.cpp" />
+  <ClCompile Include="..\SampleSortVersionA.cpp" />
+  <ClCompile Include="..\append.cpp" />
+  <ClCompile Include="..\chooseGlobalSplitters.cpp" />
+  <ClCompile Include="..\chooseRegularSamples.cpp" />
+  <ClCompile Include="..\findBucket.cpp" />
+  <ClCompile Include="..\splitIntoEqualChunks.cpp" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
