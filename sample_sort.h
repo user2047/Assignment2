@@ -1,12 +1,14 @@
 #pragma once
 #include <vector>
 using std::vector;
-std::vector<int> sampleSortVersionA(std::vector<int>& array, int numChunks);
 
-void splitIntoEqualChunks(const std::vector<int>& input,
-                          std::vector<std::vector<int>>& chunks);
+vector<int> sampleSortVersionA(vector<int>& array, int numChunks);
+vector<int> sampleSortVersionB(vector<int>& array, int numChunks);
+vector<int> sampleSortVersionC(vector<int>& array, int numChunks);
 
-std::vector<int> chooseRegularSamples(const std::vector<int>& chunk, int k);
-std::vector<int> chooseGlobalSplitters(const std::vector<int>& allSamples, int k);
-int findBucket(int x, const std::vector<int>& splitters);
-void append(std::vector<int>& dest, const std::vector<int>& src);
+void splitIntoEqualChunks(const vector<int>& input,vector<vector<int>>& chunks);
+
+vector<int> chooseRegularSamples(const vector<int>& chunk, int k);
+vector<int> chooseGlobalSplitters(const vector<int>& allSamples, int k);
+int findBucket(int x, const vector<int>& splitters);
+void append(vector<int>& dest, const vector<int>& src);

@@ -1,7 +1,6 @@
 #include "sample_sort.h"
 #include "PerformanceTest.h"
 
-#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <iomanip>
@@ -14,20 +13,14 @@ using std::random_device;
 using std::mt19937;
 using std::uniform_int_distribution;
 using std::chrono::high_resolution_clock;
-using std::chrono::duration;
 using std::ofstream;
 using std::fixed;
 using std::setprecision;
-using std::cerr;
 using std::endl;
 using std::cout;
-using std::to_string;
-using std::min;
-using std::max;
 using std::scientific;
- 
 
-// Helper function definition to generate random, unsorted data
+
 vector<int> generateRandomData(int size, int seed)
 {
     vector<int> data(size);
@@ -44,7 +37,6 @@ vector<int> generateRandomData(int size, int seed)
     return data;
 }
 
-// Helper function definition to verify that a vector is sorted in non-decreasing order
 bool verifySorted(const vector<int>& data)
 {
     for (size_t i = 1; i < data.size(); i++)
@@ -75,67 +67,111 @@ double testSampleSortVersionA(const vector<int>& data, int numChunks, bool verif
     return elapsed;
 }
 
-double runSampleSortTrials(int dataSize, int numTrials, int numChunks)
+double runSampleSortTrialsA(int dataSize, int numTrials, int numChunks)
 {
     double totalTime = 0.0;
-    int successfulTrials = 0;
 
     for (int trial = 0; trial < numTrials; trial++)
     {
         vector<int> data = generateRandomData(dataSize);
         double time = testSampleSortVersionA(data, numChunks, trial == 0);
+        totalTime += time;
+    }
 
-        if (time >= 0.0)
+    return (numTrials > 0) ? (totalTime / numTrials) : -1.0;
+}
+
+double testSampleSortVersionB(const vector<int>& data, int numChunks, bool verify)
+{
+    vector<int> workingData = data; // copy so original input stays unchanged
+
+    auto start = high_resolution_clock::now();
+    vector<int> result = sampleSortVersionB(workingData, numChunks);
+    auto end = high_resolution_clock::now();
+
+    double elapsed = std::chrono::duration<double>(end - start).count();
+    if (verify)
+    {
+        if (!verifySorted(result))
         {
-            totalTime += time;
-            successfulTrials++;
+            std::cerr << "ERROR: Sample Sort Version B verification failed!" << std::endl;
         }
     }
 
-    return (successfulTrials > 0) ? (totalTime / successfulTrials) : -1.0;
+    return elapsed;
+}
+
+double runSampleSortTrialsB(int dataSize, int numTrials, int numChunks)
+{
+    double totalTime = 0.0;
+
+    for (int trial = 0; trial < numTrials; trial++)
+    {
+        vector<int> data = generateRandomData(dataSize);
+        double time = testSampleSortVersionB(data, numChunks, trial == 0);
+        totalTime += time;
+    }
+
+    return (numTrials > 0) ? (totalTime / numTrials) : -1.0;
+}
+
+double testSampleSortVersionC(const vector<int>& data, int numChunks, bool verify)
+{
+    vector<int> workingData = data; // copy so original input stays unchanged
+
+    auto start = high_resolution_clock::now();
+    vector<int> result = sampleSortVersionC(workingData, numChunks);
+    auto end = high_resolution_clock::now();
+
+    double elapsed = std::chrono::duration<double>(end - start).count();
+    if (verify)
+    {
+        if (!verifySorted(result))
+        {
+            std::cerr << "ERROR: Sample Sort Version C verification failed!" << std::endl;
+        }
+    }
+
+    return elapsed;
+}
+
+double runSampleSortTrialsC(int dataSize, int numTrials, int numChunks)
+{
+    double totalTime = 0.0;
+
+    for (int trial = 0; trial < numTrials; trial++)
+    {
+        vector<int> data = generateRandomData(dataSize);
+        double time = testSampleSortVersionC(data, numChunks, trial == 0);
+        totalTime += time;
+    }
+
+    return (numTrials > 0) ? (totalTime / numTrials) : -1.0;
 }
 
 void runPerformanceTest(const string& outputFilename, int numChunks)
 {
     vector<int> testSizes = {
-        256,
-        512,
-        1024,
-        2048,
-        4096,
-        8192,
-        16384,
-        32768,
-        65536,
-        131072,
-        262144,
-        524288,
-        1048576,
-        2097152,
-        4194304,
-        8388608,
-        16777216
+        256, 512, 1024, 2048, 4096, 8192,
+        16384, 32768, 65536, 131072,
+        262144, 524288, 1048576
     };
 
     auto getNumTrials = [](int size) {
         if (size <= 8192) return 10;
         if (size <= 131072) return 5;
-        if (size <= 1048576) return 3;
-        return 1;
-        };
+        return 3;
+    };
 
     ofstream csvFile(outputFilename);
-    csvFile << "Size,Algorithm,AverageTime(s),NumTrials,NumChunks" <<  endl;
+    csvFile << "Size,Algorithm,AverageTime(s),NumTrials,NumChunks" << endl;
 
     cout << "===========================================================" << endl;
-    cout << "         SAMPLE SORT VERSION A PERFORMANCE TEST" << endl;
+    cout << "         SAMPLE SORT PERFORMANCE TEST (A, B and C)" << endl;
     cout << "===========================================================" << endl;
     cout << "Output file: " << outputFilename << endl;
     cout << "Chunks: " << numChunks << endl;
-    cout << "Testing sizes from 2^8 (" << testSizes.front()
-         << ") to 2^24 (" << testSizes.back() << ")" << endl;
-    cout << "===========================================================" << endl;
-    cout << endl;
+    cout << "===========================================================" << endl << endl;
 
     for (int size : testSizes)
     {
@@ -143,24 +179,27 @@ void runPerformanceTest(const string& outputFilename, int numChunks)
 
         cout << "Testing size n = " << size
             << " (" << numTrials << " trials)..." << endl;
-        double avgTime = runSampleSortTrials(size, numTrials, numChunks);
 
-        if (avgTime >= 0.0)
-        {
-            cout << "  SampleSortVersionA : "
-                << fixed << setprecision(6)
-                << avgTime << " seconds" << endl;
+        double avgA = runSampleSortTrialsA(size, numTrials, numChunks);
+        cout << "  SampleSortVersionA : "
+            << fixed << setprecision(6) << avgA << " seconds" << endl;
+        csvFile << size << ",SampleSortVersionA,"
+                << scientific << setprecision(10) << avgA << ","
+                << numTrials << "," << numChunks << endl;
 
-            csvFile << size << ","
-                << "SampleSortVersionA" << ","
-                << scientific << setprecision(10) << avgTime << ","
-                << numTrials << ","
-                << numChunks << endl;
-        }
-        else
-        {
-            cout << "  SampleSortVersionA : SKIPPED" << endl;
-        }
+        double avgB = runSampleSortTrialsB(size, numTrials, numChunks);
+        cout << "  SampleSortVersionB : "
+            << fixed << setprecision(6) << avgB << " seconds" << endl;
+        csvFile << size << ",SampleSortVersionB,"
+                << scientific << setprecision(10) << avgB << ","
+                << numTrials << "," << numChunks << endl;
+
+        double avgC = runSampleSortTrialsC(size, numTrials, numChunks);
+        cout << "  SampleSortVersionC : "
+            << fixed << setprecision(6) << avgC << " seconds" << endl;
+        csvFile << size << ",SampleSortVersionC,"
+                << scientific << setprecision(10) << avgC << ","
+                << numTrials << "," << numChunks << endl;
 
         cout << endl;
     }

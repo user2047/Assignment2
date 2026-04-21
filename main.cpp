@@ -7,19 +7,34 @@ using std::cout;
 using std::endl;
 
 vector<int> sampleSortVersionA(vector<int>& Array, int numChunks);
+vector<int> sampleSortVersionB(vector<int>& Array, int numChunks);
+vector<int> sampleSortVersionC(vector<int>& Array, int numChunks);
 
 int main()
 {
     vector<int> data = {9, 3, 7, 1, 8, 2, 6, 5, 4, 0};
     int numChunks = 4;
 
-    vector<int> sorted = sampleSortVersionA(data, numChunks);
+    vector<int> sortedA = sampleSortVersionA(data, numChunks);
+    vector<int> sortedB = sampleSortVersionB(data, numChunks);
+    vector<int> sortedC = sampleSortVersionC(data, numChunks);
 
-    for (int x : sorted)
+    cout << "Version A: ";
+    for (int x : sortedA)
         cout << x << " ";
     cout << endl;
 
-	runPerformanceTest("sample_sort_a_results.csv", numChunks);
+    cout << "Version B: ";
+    for (int x : sortedB)
+        cout << x << " ";
+    cout << endl;
+
+    cout << "Version C: ";
+    for (int x : sortedC)
+        cout << x << " ";
+    cout << endl;
+
+    runPerformanceTest("sample_sort_results.csv", numChunks);
 
     return 0;
 }

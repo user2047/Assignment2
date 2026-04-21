@@ -1,0 +1,3 @@
+Size,Algorithm,AverageTime(s),NumTrials,NumChunks
+256,SampleSortVersionA,6.3856000000e-04,10,4
+256,SampleSortVersionB,2.5013000000e-04,10,4
