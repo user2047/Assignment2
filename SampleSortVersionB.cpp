@@ -3,6 +3,7 @@
 #include "Latch.h"
 
 #include <algorithm>
+#include <atomic>
 #include <vector>
 
 using std::sort;
@@ -27,8 +28,6 @@ vector<int> sampleSortVersionB(vector<int>& array, int numChunks)
         numChunks = arraySize;
     }
 
-    // Phase 0: Setup
-
     vector<vector<int>> chunks(numChunks);
     splitIntoEqualChunks(array, chunks);
 
@@ -44,23 +43,38 @@ vector<int> sampleSortVersionB(vector<int>& array, int numChunks)
     vector<vector<int>> finalBuckets(numChunks);
 
     ThreadPool pool(numChunks);
+    std::atomic<bool> taskFailed{ false };
 
-    // Phase 1: Local sort + local sample selection
+    // Phase 1: one fine-grained task per chunk
     Latch sortLatch(numChunks);
-
     for (int i = 0; i < numChunks; i++)
     {
         pool.submitTask([&, i]()
             {
-                sort(chunks[i].begin(), chunks[i].end());
-                localSamples[i] = chooseRegularSamples(chunks[i], numChunks - 1);
+                try
+                {
+                    sort(chunks[i].begin(), chunks[i].end());
+                    localSamples[i] = chooseRegularSamples(chunks[i], numChunks - 1);
+                }
+                catch (...)
+                {
+                    taskFailed.store(true);
+                }
+
                 sortLatch.countDown();
             });
     }
-
     sortLatch.wait();
 
-    // Phase 2: Gather all samples and choose splitters
+    if (taskFailed.load())
+    {
+        pool.shutdown();
+        vector<int> fallback = array;
+        sort(fallback.begin(), fallback.end());
+        return fallback;
+    }
+
+    // Phase 2: gather and select splitters
     for (int i = 0; i < numChunks; i++)
     {
         append(allSamples, localSamples[i]);
@@ -69,62 +83,93 @@ vector<int> sampleSortVersionB(vector<int>& array, int numChunks)
     sort(allSamples.begin(), allSamples.end());
     splitters = chooseGlobalSplitters(allSamples, numChunks - 1);
 
-    // Phase 3: Partition each chunk into local buckets
+    // Phase 3: partition tasks
     Latch partitionLatch(numChunks);
-
     for (int i = 0; i < numChunks; i++)
     {
         pool.submitTask([&, i]()
             {
-                for (int value : chunks[i])
+                try
                 {
-                    int bucketIndex = findBucket(value, splitters);
-                    localBuckets[i][bucketIndex].push_back(value);
+                    for (int value : chunks[i])
+                    {
+                        int bucketIndex = findBucket(value, splitters);
+                        localBuckets[i][bucketIndex].push_back(value);
+                    }
+                }
+                catch (...)
+                {
+                    taskFailed.store(true);
                 }
 
                 partitionLatch.countDown();
             });
     }
-
     partitionLatch.wait();
 
-    // Phase 4: Merge local bucket pieces into final buckets
-    Latch mergeLatch(numChunks);
+    if (taskFailed.load())
+    {
+        pool.shutdown();
+        vector<int> fallback = array;
+        sort(fallback.begin(), fallback.end());
+        return fallback;
+    }
 
+    // Phase 4: merge tasks
+    Latch mergeLatch(numChunks);
     for (int b = 0; b < numChunks; b++)
     {
         pool.submitTask([&, b]()
             {
-                vector<int> merged;
-
-                for (int i = 0; i < numChunks; i++)
+                try
                 {
-                    append(merged, localBuckets[i][b]);
+                    vector<int> merged;
+
+                    for (int i = 0; i < numChunks; i++)
+                    {
+                        append(merged, localBuckets[i][b]);
+                    }
+
+                    finalBuckets[b] = std::move(merged);
+                }
+                catch (...)
+                {
+                    taskFailed.store(true);
                 }
 
-                finalBuckets[b] = std::move(merged);
                 mergeLatch.countDown();
             });
     }
-
     mergeLatch.wait();
 
-    // Phase 5: Final sort of each bucket
+    if (taskFailed.load())
+    {
+        pool.shutdown();
+        vector<int> fallback = array;
+        sort(fallback.begin(), fallback.end());
+        return fallback;
+    }
 
+    // Phase 5: final bucket sorts
     Latch finalSortLatch(numChunks);
-
     for (int b = 0; b < numChunks; b++)
     {
         pool.submitTask([&, b]()
             {
-                sort(finalBuckets[b].begin(), finalBuckets[b].end());
+                try
+                {
+                    sort(finalBuckets[b].begin(), finalBuckets[b].end());
+                }
+                catch (...)
+                {
+                    taskFailed.store(true);
+                }
+
                 finalSortLatch.countDown();
             });
     }
-
     finalSortLatch.wait();
 
-    // Phase 6: Concatenate all final buckets
     vector<int> result;
     result.reserve(arraySize);
 
@@ -134,5 +179,13 @@ vector<int> sampleSortVersionB(vector<int>& array, int numChunks)
     }
 
     pool.shutdown();
+
+    if (taskFailed.load())
+    {
+        vector<int> fallback = array;
+        sort(fallback.begin(), fallback.end());
+        return fallback;
+    }
+
     return result;
 }

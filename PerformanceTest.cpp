@@ -25,13 +25,21 @@ vector<int> generateRandomData(int size, int seed)
 {
     vector<int> data(size);
 
-    random_device rd;
-    mt19937 gen(seed == -1 ? rd() : seed);
+    static thread_local mt19937 defaultGen(std::random_device{}());
+    mt19937 seededGen;
+
+    mt19937* genPtr = &defaultGen;
+    if (seed != -1)
+    {
+        seededGen = mt19937(seed);
+        genPtr = &seededGen;
+    }
+
     uniform_int_distribution<int> dist(1, 1000000);
 
     for (int i = 0; i < size; i++)
     {
-        data[i] = dist(gen);
+        data[i] = dist(*genPtr);
     }
 
     return data;
@@ -163,13 +171,37 @@ void runPerformanceTest(const string& outputFilename, int numChunks)
         return 3;
     };
 
-    ofstream csvFile(outputFilename);
+    string actualOutputFilename = outputFilename;
+    ofstream csvFile(actualOutputFilename, std::ios::out | std::ios::trunc);
+
+    if (!csvFile.is_open())
+    {
+        size_t dot = outputFilename.find_last_of('.');
+        string base = (dot == string::npos) ? outputFilename : outputFilename.substr(0, dot);
+        string ext = (dot == string::npos) ? "" : outputFilename.substr(dot);
+
+        for (int attempt = 1; attempt <= 5 && !csvFile.is_open(); attempt++)
+        {
+            actualOutputFilename = base + "_" + std::to_string(attempt) + ext;
+            csvFile.open(actualOutputFilename, std::ios::out | std::ios::trunc);
+        }
+
+        if (!csvFile.is_open())
+        {
+            std::cerr << "ERROR: Could not open output CSV file. It may be locked by another program." << std::endl;
+            return;
+        }
+
+        std::cout << "Warning: Primary CSV file was unavailable. Writing to: "
+                  << actualOutputFilename << std::endl;
+    }
+
     csvFile << "Size,Algorithm,AverageTime(s),NumTrials,NumChunks" << endl;
 
     cout << "===========================================================" << endl;
     cout << "         SAMPLE SORT PERFORMANCE TEST (A, B and C)" << endl;
     cout << "===========================================================" << endl;
-    cout << "Output file: " << outputFilename << endl;
+    cout << "Output file: " << actualOutputFilename << endl;
     cout << "Chunks: " << numChunks << endl;
     cout << "===========================================================" << endl << endl;
 
@@ -208,6 +240,6 @@ void runPerformanceTest(const string& outputFilename, int numChunks)
 
     cout << "===========================================================" << endl;
     cout << "Performance test complete!" << endl;
-    cout << "Results saved to: " << outputFilename << endl;
+    cout << "Results saved to: " << actualOutputFilename << endl;
     cout << "===========================================================" << endl;
 }
