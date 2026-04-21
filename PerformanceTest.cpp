@@ -63,7 +63,7 @@ double testSampleSortVersionA(const vector<int>& data, int numChunks, bool verif
     vector<int> result = sampleSortVersionA(workingData, numChunks);
     auto end = high_resolution_clock::now();
 
-    double duration = duration<double>(end - start).count();
+    double elapsed = std::chrono::duration<double>(end - start).count();
     if (verify)
     {
         if (!verifySorted(result))
@@ -72,7 +72,7 @@ double testSampleSortVersionA(const vector<int>& data, int numChunks, bool verif
         }
     }
 
-    return duration;
+    return elapsed;
 }
 
 double runSampleSortTrials(int dataSize, int numTrials, int numChunks)

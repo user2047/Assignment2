@@ -138,7 +138,8 @@
   <ClCompile Include="..\chooseGlobalSplitters.cpp" />
   <ClCompile Include="..\chooseRegularSamples.cpp" />
   <ClCompile Include="..\findBucket.cpp" />
-  <ClCompile Include="..\splitIntoEqualChunks.cpp" />
+  <ClCompile Include="..\\splitIntoEqualChunks.cpp" />
+  <ClCompile Include="..\\PerformanceTest.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
