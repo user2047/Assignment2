@@ -52,4 +52,8 @@ struct SortStats
     double wallTimeSeconds = 0.0;
     double cpuTimeSeconds  = 0.0;   // approximate CPU time via std::clock()
     BucketStats bucketStats;
+
+    // Version D instrumentation
+    bool avx2Detected = false;
+    bool avx2Used = false;
 };

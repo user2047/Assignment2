@@ -6,6 +6,7 @@ using std::vector;
 vector<int> sampleSortVersionA(vector<int>& array, int numChunks, SortStats* stats = nullptr);
 vector<int> sampleSortVersionB(vector<int>& array, int numChunks, SortStats* stats = nullptr);
 vector<int> sampleSortVersionC(vector<int>& array, int numChunks, SortStats* stats = nullptr);
+vector<int> sampleSortVersionD(vector<int>& array, int numChunks, SortStats* stats = nullptr);
 
 void splitIntoEqualChunks(const vector<int>& input,vector<vector<int>>& chunks);
 

@@ -137,6 +137,7 @@
     <ClCompile Include="..\\PerformanceTest.cpp" />
     <ClCompile Include="..\SampleSortVersionB.cpp" />
     <ClCompile Include="..\SampleSortVersionC.cpp" />
+    <ClCompile Include="..\SampleSortVersionD.cpp" />
     <ClCompile Include="..\ThreadPool.cpp" />
     <ClCompile Include="..\Latch.cpp" />
   </ItemGroup>

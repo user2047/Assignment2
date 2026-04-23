@@ -11,37 +11,32 @@
 using std::sort;
 using std::vector;
 
-vector<int> sampleSortVersionB(vector<int>& array, int numChunks, SortStats* stats)
+vector<int> sampleSortVersionB(vector<int>& Array, int numChunks, SortStats* stats)
 {
-    int arraySize = static_cast<int>(array.size());
+	// Array: input Array
+	// numChunks: number of chunks
 
-    if (arraySize <= 1)
-    {
-        return array;
-    }
+	// Length of the input Array
+    int arraySize = Array.size();
 
-    if (numChunks <= 0)
-    {
-        numChunks = 1;
-    }
+	// Phase 0: split input array into chunks
 
-    if (numChunks > arraySize)
-    {
-        numChunks = arraySize;
-    }
+	// Create a vector of length numChunks
+    vector<vector<int>> chunkArrays(numChunks);
 
-    vector<vector<int>> chunks(numChunks);
-    splitIntoEqualChunks(array, chunks);
+	// Split input Array into numChunks and put fragments into chunkArrays
+    splitIntoEqualChunks(Array, chunkArrays);
 
+
+	// localSamples[i] = samples chosen from chunk i
     vector<vector<int>> localSamples(numChunks);
+
+	// Create a vector of integers called allSamples
     vector<int> allSamples;
-    vector<int> splitters;
 
-    vector<vector<vector<int>>> localBuckets(
-        numChunks,
-        vector<vector<int>>(numChunks)
-    );
+    vector<vector<vector<int>>> localBuckets(numChunks,vector<vector<int>>(numChunks));
 
+    //
     vector<vector<int>> finalBuckets(numChunks);
 
     ThreadPool pool(numChunks);
