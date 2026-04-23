@@ -1,9 +1,27 @@
+// Version C: Oversampling Sample Sort with Thread Pool
+//
+// Optimization strategy: Adaptive oversampling.
+// A standard sample sort picks (p-1) samples per chunk.  When the data is
+// skewed (heavy duplicates or a very uneven gap distribution) those splitters
+// cluster together and leave some buckets much larger than others, making the
+// final per-bucket sort the bottleneck.
+//
+// Version C fixes this by:
+//   1. Running a cheap preview sort + sample pass in parallel (Phase 1).
+//   2. Analysing the merged preview samples on the main thread to detect skew.
+//   3. If skew is detected, increasing the sample count (oversample factor 4x
+//      instead of 1x) and running a second parallel sampling pass (Phase 3).
+//   4. Choosing splitters from the larger pool, which spreads elements more
+//      evenly across buckets even for skewed inputs.
+//   5. Using the same low-overhead output path as Version A / Version B:
+//      pre-sized output array, direct scatter, in-place sort per bucket.
+//      No intermediate finalBuckets, no extra copies.
+
 #include "sample_sort.h"
 #include "ThreadPool.h"
 #include "Latch.h"
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <ctime>
 #include <vector>
@@ -15,298 +33,245 @@ using std::vector;
 
 namespace
 {
-    int safeSampleCount(const vector<int>& chunk, int desiredCount)
+    // Returns the number of samples to draw from a chunk, clamped to a safe range.
+    int safeSampleCount(int chunkSize, int desired)
     {
-        if (chunk.size() <= 1)
-        {
-            return 1;
-        }
-
-        int maxUseful = static_cast<int>(chunk.size()) - 1;
-        return max(1, min(desiredCount, maxUseful));
+        if (chunkSize <= 1) return 1;
+        return max(1, min(desired, chunkSize - 1));
     }
 
-    int estimateOversampleFactor(const vector<int>& previewSamples)
+    // Inspects the merged preview samples and returns an oversampling multiplier.
+    // Returns 4 when heavy skew is detected, 2 otherwise.
+    int estimateOversampleFactor(const vector<int>& samples)
     {
-        if (previewSamples.size() < 2)
-        {
-            return 2;
-        }
+        if (static_cast<int>(samples.size()) < 2) return 2;
 
-        int repeatedNeighbors = 0;
+        int    repeated    = 0;
         long long totalGap = 0;
-        long long largestGap = 0;
+        long long maxGap   = 0;
 
-        for (size_t i = 1; i < previewSamples.size(); i++)
+        for (size_t i = 1; i < samples.size(); i++)
         {
-            long long gap = static_cast<long long>(previewSamples[i]) -
-                            static_cast<long long>(previewSamples[i - 1]);
-
-            if (previewSamples[i] == previewSamples[i - 1])
-            {
-                repeatedNeighbors++;
-            }
-
-            if (gap > largestGap)
-            {
-                largestGap = gap;
-            }
-
+            long long gap = static_cast<long long>(samples[i]) -
+                            static_cast<long long>(samples[i - 1]);
+            if (gap == 0) repeated++;
+            if (gap > maxGap) maxGap = gap;
             totalGap += gap;
         }
 
-        double duplicateRatio =
-            static_cast<double>(repeatedNeighbors) /
-            static_cast<double>(previewSamples.size() - 1);
+        double dupRatio  = static_cast<double>(repeated) /
+                           static_cast<double>(samples.size() - 1);
+        double gapSkew   = (totalGap > 0)
+                           ? static_cast<double>(maxGap) / static_cast<double>(totalGap)
+                           : 1.0;
 
-        double gapSkew = (totalGap > 0)
-            ? static_cast<double>(largestGap) / static_cast<double>(totalGap)
-            : 1.0;
-
-        if (duplicateRatio > 0.25 || gapSkew > 0.35)
-        {
-            return 4;
-        }
-
-        return 2;
+        return (dupRatio > 0.25 || gapSkew > 0.35) ? 4 : 2;
     }
 }
 
-vector<int> sampleSortVersionC(vector<int>& array, int numChunks, SortStats* stats)
+vector<int> sampleSortVersionC(vector<int>& Array, int numChunks, SortStats* stats)
 {
-    int arraySize = static_cast<int>(array.size());
-
-    if (arraySize <= 1)
-    {
-        return array;
-    }
-
-    if (numChunks <= 0)
-    {
-        numChunks = 1;
-    }
-
-    if (numChunks > arraySize)
-    {
-        numChunks = arraySize;
-    }
-
-    vector<vector<int>> chunks(numChunks);
-    splitIntoEqualChunks(array, chunks);
-
-    vector<vector<int>> previewLocalSamples(numChunks);
-    vector<int> previewAllSamples;
-
-    vector<vector<int>> localSamples(numChunks);
-    vector<int> allSamples;
-    vector<int> splitters;
-
-    vector<vector<vector<int>>> localBuckets(
-        numChunks,
-        vector<vector<int>>(numChunks)
-    );
-
-    vector<vector<int>> finalBuckets(numChunks);
-
-    ThreadPool pool(numChunks);
-    std::atomic<bool> taskFailed{ false };
+    int arraySize = static_cast<int>(Array.size());
 
     std::clock_t cpuStart = std::clock();
     auto wallStart = std::chrono::high_resolution_clock::now();
 
-    // Phase 1: local sort + preview sampling
-    Latch sortLatch(numChunks);
+    // Phase 0: Split input Array into Chunks
+
+    // Create a vector of length numChunks
+    vector<vector<int>> chunkArrays(numChunks);
+
+    // Split input Array into numChunks and put fragments into chunkArrays
+    splitIntoEqualChunks(Array, chunkArrays);
+
+    // previewLocalSamples[i] = cheap preview samples from chunk i (numChunks-1 samples)
+    vector<vector<int>> previewLocalSamples(numChunks);
+
+    // localSamples[i] = final (possibly oversampled) samples from chunk i
+    vector<vector<int>> localSamples(numChunks);
+
+    // localBuckets[i][b] = elements from chunk i that belong in bucket b
+    vector<vector<vector<int>>> localBuckets(numChunks, vector<vector<int>>(numChunks));
+
+    // counts[i][b] = number of elements in localBuckets[i][b]
+    vector<vector<int>> counts(numChunks, vector<int>(numChunks, 0));
+
+    // Create a thread pool with one thread per chunk
+    ThreadPool pool(numChunks);
+
+    // Phase 1: Sort each chunk and collect preview samples in parallel
+
+    // Create a latch to wait for all Phase 1 tasks to complete
+    Latch phase1Latch(numChunks);
+
+    // Iterate i from 0 to numChunks-1
     for (int i = 0; i < numChunks; i++)
     {
+        // Submit a sort+sample task to the thread pool for chunk i
         pool.submitTask([&, i]()
         {
-            try
-            {
-                sort(chunks[i].begin(), chunks[i].end());
+            // Sort the chunk
+            sort(chunkArrays[i].begin(), chunkArrays[i].end());
 
-                int previewCount = safeSampleCount(chunks[i], numChunks - 1);
-                previewLocalSamples[i] = chooseRegularSamples(chunks[i], previewCount);
-            }
-            catch (...)
-            {
-                taskFailed.store(true);
-            }
+            // Pick numChunks-1 preview samples from the sorted chunk
+            int count = safeSampleCount(static_cast<int>(chunkArrays[i].size()), numChunks - 1);
+            previewLocalSamples[i] = chooseRegularSamples(chunkArrays[i], count);
 
-            sortLatch.countDown();
+            // Signal that this task is done
+            phase1Latch.countDown();
         });
     }
-    sortLatch.wait();
 
-    if (taskFailed.load())
-    {
-        pool.shutdown();
-        vector<int> fallback = array;
-        sort(fallback.begin(), fallback.end());
-        return fallback;
-    }
+    // Wait for all Phase 1 tasks to finish before proceeding
+    phase1Latch.wait();
 
-    // Phase 2: estimate data skew and choose oversampling
+    // Phase 2: Analyse preview samples on the main thread to detect data skew
+
+    // Merge all preview samples into one sorted vector
+    vector<int> previewAllSamples;
     for (int i = 0; i < numChunks; i++)
-    {
         append(previewAllSamples, previewLocalSamples[i]);
-    }
 
     sort(previewAllSamples.begin(), previewAllSamples.end());
 
-    int oversampleFactor = estimateOversampleFactor(previewAllSamples);
+    // Choose an oversampling factor based on detected skew (1x or 4x)
+    int oversampleFactor      = estimateOversampleFactor(previewAllSamples);
     int desiredSamplesPerChunk = oversampleFactor * (numChunks - 1);
 
-    // Phase 3: full oversampling pass
-    Latch resampleLatch(numChunks);
+    // Phase 3: Collect oversampled local samples in parallel
+    // (If oversampleFactor == 1 this is identical to Phase 1 samples and reuses them)
+
+    // Create a latch to wait for all Phase 3 tasks to complete
+    Latch phase3Latch(numChunks);
+
+    // Iterate i from 0 to numChunks-1
     for (int i = 0; i < numChunks; i++)
     {
+        // Submit an oversampling task to the thread pool for chunk i
         pool.submitTask([&, i]()
         {
-            try
-            {
-                int sampleCount = safeSampleCount(chunks[i], desiredSamplesPerChunk);
-                localSamples[i] = chooseRegularSamples(chunks[i], sampleCount);
-            }
-            catch (...)
-            {
-                taskFailed.store(true);
-            }
+            // Draw desiredSamplesPerChunk samples from the already-sorted chunk
+            int count = safeSampleCount(static_cast<int>(chunkArrays[i].size()),
+                                        desiredSamplesPerChunk);
+            localSamples[i] = chooseRegularSamples(chunkArrays[i], count);
 
-            resampleLatch.countDown();
+            // Signal that this task is done
+            phase3Latch.countDown();
         });
     }
-    resampleLatch.wait();
 
-    if (taskFailed.load())
-    {
-        pool.shutdown();
-        vector<int> fallback = array;
-        sort(fallback.begin(), fallback.end());
-        return fallback;
-    }
+    // Wait for all Phase 3 tasks to finish before proceeding
+    phase3Latch.wait();
 
+    // Merge all oversampled local samples and choose global splitters
+    vector<int> allSamples;
     for (int i = 0; i < numChunks; i++)
-    {
         append(allSamples, localSamples[i]);
-    }
 
     sort(allSamples.begin(), allSamples.end());
-    splitters = chooseGlobalSplitters(allSamples, numChunks - 1);
+    vector<int> splitters = chooseGlobalSplitters(allSamples, numChunks - 1);
 
-    // Phase 4: partition tasks
-    Latch partitionLatch(numChunks);
+    // Phase 4: Partition each chunk into local buckets in parallel
+
+    // Create a latch to wait for all Phase 4 tasks to complete
+    Latch phase4Latch(numChunks);
+
+    // Iterate i from 0 to numChunks-1
     for (int i = 0; i < numChunks; i++)
     {
+        // Submit a partitioning task to the thread pool for chunk i
         pool.submitTask([&, i]()
         {
-            try
+            // Iterate over every value in that chunk
+            for (int value : chunkArrays[i])
             {
-                for (int value : chunks[i])
-                {
-                    int bucketIndex = findBucket(value, splitters);
-                    localBuckets[i][bucketIndex].push_back(value);
-                }
-            }
-            catch (...)
-            {
-                taskFailed.store(true);
+                // Determine which bucket this value belongs in
+                int b = findBucket(value, splitters);
+
+                // Place the value into the correct local bucket
+                localBuckets[i][b].push_back(value);
             }
 
-            partitionLatch.countDown();
+            // Record bucket element counts for the prefix-sum in Phase 5
+            for (int b = 0; b < numChunks; b++)
+                counts[i][b] = static_cast<int>(localBuckets[i][b].size());
+
+            // Signal that this task is done
+            phase4Latch.countDown();
         });
     }
-    partitionLatch.wait();
 
-    if (taskFailed.load())
-    {
-        pool.shutdown();
-        vector<int> fallback = array;
-        sort(fallback.begin(), fallback.end());
-        return fallback;
-    }
+    // Wait for all Phase 4 tasks to finish before proceeding
+    phase4Latch.wait();
 
-    // Phase 5: merge tasks
-    Latch mergeLatch(numChunks);
+    // Phase 5: Compute final bucket sizes and output positions (main thread)
+
+    // Create a vector of integers called bucketSizes of length numChunks, initialized to 0
+    vector<int> bucketSizes(numChunks, 0);
+
+    // Sum up the counts for each bucket across all chunks
+    for (int b = 0; b < numChunks; b++)
+        for (int i = 0; i < numChunks; i++)
+            bucketSizes[b] += counts[i][b];
+
+    // Determine the starting output index for each bucket by doing a prefix sum on bucketSizes
+    vector<int> bucketStart(numChunks, 0);
+    for (int b = 1; b < numChunks; b++)
+        bucketStart[b] = bucketStart[b - 1] + bucketSizes[b - 1];
+
+    // Allocate the output array once - no further copies needed
+    vector<int> output(arraySize);
+
+    // Phase 6: Merge each bucket's pieces directly into output and sort in place
+
+    // Create a latch to wait for all Phase 6 tasks to complete
+    Latch phase6Latch(numChunks);
+
+    // Iterate b from 0 to numChunks-1
     for (int b = 0; b < numChunks; b++)
     {
+        // Submit a merge+sort task to the thread pool for bucket b
         pool.submitTask([&, b]()
         {
-            try
-            {
-                vector<int> merged;
+            // Write the start position for this bucket in the output array
+            int start = bucketStart[b];
+            int pos   = start;
 
-                for (int i = 0; i < numChunks; i++)
-                {
-                    append(merged, localBuckets[i][b]);
-                }
-
-                finalBuckets[b] = std::move(merged);
-            }
-            catch (...)
+            // Merge all pieces of bucket b from each chunk directly into the output array
+            for (int i = 0; i < numChunks; i++)
             {
-                taskFailed.store(true);
+                for (int value : localBuckets[i][b])
+                    output[pos++] = value;
             }
 
-            mergeLatch.countDown();
+            // Sort the bucket's slice of the output array in place
+            sort(output.begin() + start, output.begin() + start + bucketSizes[b]);
+
+            // Signal that this task is done
+            phase6Latch.countDown();
         });
     }
-    mergeLatch.wait();
 
-    if (taskFailed.load())
-    {
-        pool.shutdown();
-        vector<int> fallback = array;
-        sort(fallback.begin(), fallback.end());
-        return fallback;
-    }
+    // Wait for all Phase 6 tasks to finish before proceeding
+    phase6Latch.wait();
 
-    // Phase 6: final sort tasks
-    Latch finalSortLatch(numChunks);
-    for (int b = 0; b < numChunks; b++)
-    {
-        pool.submitTask([&, b]()
-        {
-            try
-            {
-                sort(finalBuckets[b].begin(), finalBuckets[b].end());
-            }
-            catch (...)
-            {
-                taskFailed.store(true);
-            }
-
-            finalSortLatch.countDown();
-        });
-    }
-    finalSortLatch.wait();
-
-    vector<int> result;
-    result.reserve(arraySize);
-
-    for (int b = 0; b < numChunks; b++)
-    {
-        append(result, finalBuckets[b]);
-    }
-
+    // Shut down the thread pool now that all tasks are complete
     pool.shutdown();
 
-    if (taskFailed.load())
-    {
-        vector<int> fallback = array;
-        sort(fallback.begin(), fallback.end());
-        return fallback;
-    }
-
+    // If stats is not null, fill in the timing and bucket size information
     if (stats)
     {
         auto wallEnd = std::chrono::high_resolution_clock::now();
         std::clock_t cpuEnd = std::clock();
+
         stats->wallTimeSeconds = std::chrono::duration<double>(wallEnd - wallStart).count();
         stats->cpuTimeSeconds  = static_cast<double>(cpuEnd - cpuStart) / CLOCKS_PER_SEC;
+
         stats->bucketStats.sizes.resize(numChunks);
         for (int b = 0; b < numChunks; b++)
-            stats->bucketStats.sizes[b] = static_cast<int>(finalBuckets[b].size());
+            stats->bucketStats.sizes[b] = bucketSizes[b];
     }
 
-    return result;
+    // Return the sorted output array
+    return output;
 }
