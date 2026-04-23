@@ -53,6 +53,8 @@ struct SortStats
     double cpuTimeSeconds  = 0.0;   // approximate CPU time via std::clock()
     BucketStats bucketStats;
 
+    bool usedFallback = false;      // true if parallel execution failed and fell back to sequential
+
     // Version D instrumentation
     bool avx2Detected = false;
     bool avx2Used = false;
